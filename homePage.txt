@@ -1,0 +1,360 @@
+<?php
+defined('BASEPATH') OR exit('No direct script access allowed');
+class Home extends CI_Controller {
+	public function __construct() {
+		parent::__construct();
+		if (!isset($_SESSION['username'])) {
+			redirect("Auth/logout");
+		}
+		$this->load->model('Auth_model');
+		$this->load->model("Tags_model");
+		$this->load->model("Articles_model");
+		$this->load->model("Catalog_model");
+		$this->load->model("Comments_model");
+		$this->load->model('Favourites_model');
+		$this->load->model('User_model');
+		$this->load->model('Todolist_model');
+		$this->load->model('Timeline_model');
+	}
+	public function index()
+	{
+		$data['sort'] = $this->session->sort_type;
+		if(isset($_SESSION['search_data'])){
+			$data['search_variable'] = $_SESSION['search_data'];
+		}
+		$data['popular'] = $this->Articles_model->get_article_by_popularityArray();
+		$data['articles'] = $this->Articles_model->get_article_page();
+		$this->load->view('layout/header.php');
+		$this->load->view('User/search_result',$data);
+		$this->load->view('layout/footer.php');
+	}
+	public function set_order()
+	{
+		$session_data['sort_type'] =  $this->input->post('sort');
+		$this->session->set_userdata($session_data);
+		redirect('Home/index');
+	}
+	public function search(){
+		unset($_SESSION['dir']);
+		unset($_SESSION['tag']);
+		$session_data['search_text'] =  $this->input->get('search_word');
+		$session_data['search_age'] =  $this->input->get('ages');
+		$session_data['search_data'] = Array($session_data['search_text'],$session_data['search_age']);
+		$this->session->set_userdata($session_data);
+		redirect('Home/index');
+}
+	public function directory()
+	{
+		unset($_SESSION['search_data']);
+		if (isset($_GET["tag"])) {
+			$selected_tag = Array("tag" => $_GET["tag"]);
+			$this->session->set_userdata($selected_tag);
+			unset($_SESSION['dir']);
+			redirect("Home/index");
+		}
+		if(isset($_GET["choice"])) {
+			$choice_safe = htmlspecialchars($_GET["choice"]);
+			$choice_format = str_replace('&quot;', "", substr($choice_safe, 1, strlen($choice_safe) -2));
+			$choice_list = Array("dir" => explode(",", $choice_format));
+			$this->session->set_userdata($choice_list);
+			unset($_SESSION['tag']);
+			redirect("Home/index");
+		}
+		$data["tags"] = $this->Tags_model->getAll();
+		$catalog = $this->get_catalog();
+		$data["firstLevel"] = $catalog["firstLevel"];
+		$data["secondLevel"] = $catalog["secondLevel"];
+		$data["thirdLevel"] = $catalog["thirdLevel"];
+		$this->load->view('layout/header.php');
+		$this->load->view('User/directory.php', $data);
+		$this->load->view('layout/footer.php');
+	}
+	public function favourites()
+	{
+		unset($_SESSION['tag']);
+		unset($_SESSION['search_data']);
+		unset($_SESSION['dir']);
+		if ($_POST) {
+			$this->Favourites_model->delete($_POST["btn_delete"] ,$_SESSION["userID"]);
+		}
+		$favourite = $this->Favourites_model->getFavourites($_SESSION["userID"]);
+		$articles =array();
+		foreach ($favourite as $key => $value){
+			array_push($articles,$this->Articles_model->getArticleById($value->articleID));
+		}
+		$data["articlesData"] = $articles ;
+		$this->load->view('layout/header.php');
+		$this->load->view('User/favourites.php',$data);
+		$this->load->view('layout/footer.php');
+	}
+	public function profile()
+	{
+		unset($_SESSION['tag']);
+		unset($_SESSION['search_data']);
+		unset($_SESSION['dir']);
+		$user_name = $_SESSION['username'];
+		$data['user'] = $this->User_model->getUserByEmail($user_name);
+		$this->load->view('layout/header.php');
+		$this->load->view('User/profile',$data);
+		$this->load->view('layout/footer.php');
+	}
+	public function edit_profile()
+	{
+		unset($_SESSION['tag']);
+		unset($_SESSION['search_data']);
+		unset($_SESSION['dir']);
+		$user_name = $_SESSION['username'];
+		if($_POST){
+			$new_data['firstName'] = $this->input->post('firstName');
+			$new_data['lastName'] = $this->input->post('lastName');
+			$new_data['mail'] = $this->input->post('mail');
+			$new_data['dob'] = $this->input->post('dob');
+			$new_data['disability'] = $this->input->post('disability');
+			$new_data['street'] = $this->input->post('street');
+			$new_data['county'] = $this->input->post('county');
+			$new_data['postalCode'] = $this->input->post('postalCode');
+			$this->User_model->update_user($user_name,$new_data);
+		}
+		$data['disabilities'] = $this->Tags_model->getTagDisabilityArray();
+		$data['user'] = $this->User_model->getUserByEmail($user_name);
+		$this->load->view('layout/header.php');
+		$this->load->view('User/edit_profile',$data);
+		$this->load->view('layout/footer.php');
+	}
+	public function todo_list()
+	{
+		unset($_SESSION['tag']);
+		unset($_SESSION['search_data']);
+		unset($_SESSION['dir']);
+		if(isset($_POST['submit'])){
+			$this->Todolist_model->addCard($_SESSION["userID"], "todo", "title", "description");
+		}
+		$data['cards'] = $this->Todolist_model->getCards($_SESSION['userID']);
+		$this->load->view('layout/header.php');
+		$this->load->view('User/todo_list.php', $data);
+		$this->load->view('layout/footer.php');
+	}
+	public function timeline()
+	{
+		unset($_SESSION['tag']);
+		unset($_SESSION['search_data']);
+		unset($_SESSION['dir']);
+		$user = $this->User_model->getUserById($_SESSION['userID']);
+		// get age
+		$dateOfBirth = $user->dob;
+		$age = floor((time() - strtotime($dateOfBirth)) / 31556926);
+		if($age <= 2) $data["age"] = "0-2 years old";
+		elseif($age <= 4) $data["age"] = "2-4 years old";
+		elseif($age <= 11) $data["age"] = "4-11 years old";
+		elseif($age <= 16) $data["age"] = "11-16 years old";
+		elseif($age <= 18) $data["age"] = "16-18 years old";
+		else $data["age"] = "18-25 years old";
+		$articles = array();
+		if($user->disability == ""){
+			// no disability, show general
+			$articles = $this->Timeline_model->getGeneralTimeline();
+		}
+		else{
+			// show general and certain disability articles
+			$articles = array_merge($this->Timeline_model->getGeneralTimeline(), $this->Timeline_model->getDisabilityTimeline($_SESSION['userID']));
+		}
+		// load status
+		for($i = 0; $i < count($articles); $i++){
+			$result = $this->Timeline_model->getTimelineStatus($_SESSION['userID'], $articles[$i]['articleID']);
+			$articles[$i]['read'] = $result['read'];
+			$articles[$i]['todo'] = $result['todo'];
+			$articles[$i]['done'] = $result['done'];
+		}
+		// sort articles by age
+		$age_sorted_articles = array();
+		foreach($articles as $article){
+			if($article["secondLevel"] == "") $article["secondLevel"]=$article["firstLevel"];
+			$age = $this->Tags_model->getArticleAge($article['articleID']);
+			if($age = "general"){
+				// put general articles in current age
+				$age_sorted_articles[$data['age']][$article['firstLevel']][$article['secondLevel']][] = array("articleID"=>$article['articleID'], "title"=>$article['title'], "read"=>$article["read"], "todo"=>$article["todo"], "done"=>$article["done"]);
+			}
+			else{
+				$age_sorted_articles[$age][$article['firstLevel']][$article['secondLevel']][] = array("articleID"=>$article['articleID'], "title"=>$article['title'], "read"=>$article["read"], "todo"=>$article["todo"], "done"=>$article["done"]);
+			}
+		}
+		$data["articles"] = $age_sorted_articles;
+		$this->load->view('layout/header.php');
+		$this->load->view('User/timeline.php', $data);
+		$this->load->view('layout/footer.php');
+	}
+	public function article($id)
+	{
+		unset($_SESSION['tag']);
+		unset($_SESSION['search_data']);
+		unset($_SESSION['dir']);
+		if (isset($_POST["comment"])) {
+			$comment_data = Array(
+				"article" => $id,
+				"author" => $_SESSION["userID"],
+				"date" => date("Y-m-d H:i:s"),
+				"likes" => 0,
+				"dislikes" => 0,
+				"text" => addslashes($_POST["comment"])
+			);
+			$this->Comments_model->insert($comment_data);
+		}
+		if(isset($_POST["favourite"])) {
+			$favourite_data = Array(
+				"userID" =>  $_SESSION["userID"],
+				"articleID" => $id
+			);
+			$this->Favourites_model->insert($favourite_data);
+			redirect("Home/favourites");
+		}
+		if (isset($_POST["comment_like"])) {
+			$this->Comments_model->incrementLikes($_POST["comment_like"]);
+		}
+		if (isset($_POST["comment_dislike"])) {
+			$this->Comments_model->incrementDislike($_POST["comment_dislike"]);
+		}
+		if (isset($_POST["article_like"])) {
+			$this->Articles_model->incrementLikes($id);
+		}
+		if (isset($_POST["article_dislike"])) {
+			$this->Articles_model->incrementDislike($id);
+		}
+		$result = $this->Articles_model->getArticleById($id);
+		if(empty($result[0])){
+			$this->load->view('layout/header.php');
+			$this->load->view('errors/cli/error_404');
+		}
+		else{
+			$data['article'] = json_decode(json_encode($result[0]), true);
+			$catalog_result = $this->Catalog_model->get_catalog_by_id($data['article']['catalog']);
+			$data['catalog'] = json_decode(json_encode($catalog_result[0]), true);
+			$data['tags'] = $this->get_article_tags_name($id);
+			$comments_result = $this->Comments_model->getComments($id);
+			if(empty($comments_result)){
+				$data['comments'] = array();
+			}
+			else{
+				$data['comments'] = json_decode(json_encode($comments_result), true);
+				for($i = 0; $i < sizeof($data["comments"]); ++$i) {
+					$data['comments'][$i]["liked"] = $this->Comments_model->isLiked($data['comments'][$i]["commentID"], $_SESSION["userID"]);
+					$data['comments'][$i]["disliked"] = $this->Comments_model->isDisliked($data['comments'][$i]["commentID"], $_SESSION["userID"]);
+				}
+			}
+			$data["liked"] = $this->Articles_model->isLiked($id, $_SESSION["userID"]);
+			$data["disliked"] = $this->Articles_model->isDisliked($id, $_SESSION["userID"]);
+			$data['relevant_reading'] = $this->get_relevant_reading($id);
+			$this->load->helper('cookie');
+			$data['cookie']=$this->input->cookie(urldecode($id),true);
+			$this->load->view('layout/header.php');
+			$this->load->view('User/article', $data);
+			$this->load->view('layout/footer.php');
+			$this->add_count($id);
+		}
+	}
+	public function save_timeline(){
+		$this->Timeline_model->update_status($_SESSION['userID'], $_POST["articleID"], $_POST["col"], $_POST["checked"]);
+	}
+	public function save_todo(){
+		$cards=array();
+		if(isset($_POST["todo"])){
+			preg_match_all('|<textarea[^>]*>(?<innerText>[^<]+)<|', $_POST["todo"], $todo);
+			$cards["todo"]=array();
+			if(!empty($todo["innerText"])){
+				for($i=0; $i<=count($todo["innerText"])/2; $i+=2){
+					$cards["todo"][$i]["title"] = $todo["innerText"][$i];
+					$cards["todo"][$i]["description"] = $todo["innerText"][$i+1];
+				}
+			}
+			else $cards["todo"] = array();
+		}
+		if(isset($_POST["doing"])){
+			preg_match_all('|<textarea[^>]*>(?<innerText>[^<]+)<|', $_POST["doing"], $doing);
+			$cards["doing"]=array();
+			if(!empty($doing["innerText"])){
+				for($i=0; $i<=count($doing["innerText"])/2; $i+=2){
+					$cards["doing"][$i]["title"] = $doing["innerText"][$i];
+					$cards["doing"][$i]["description"] = $doing["innerText"][$i+1];
+				}
+			}
+			else $cards["doing"] = array();
+		}
+		if(isset($_POST["done"])){
+			preg_match_all('|<textarea[^>]*>(?<innerText>[^<]+)<|', $_POST["done"], $done);
+			$cards["done"]=array();
+			if(!empty($done["innerText"])){
+				for($i=0; $i<=count($done["innerText"])/2; $i+=2){
+					$cards["done"][$i]["title"] = $done["innerText"][$i];
+					$cards["done"][$i]["description"] = $done["innerText"][$i+1];
+				}
+			}
+			else $cards["done"] = array();
+		}
+		$this->Todolist_model->saveCards($_SESSION["userID"], $cards);
+	}
+	public function add_to_todo(){
+		$result = $this->Articles_model->getArticleById($_POST["articleID"]);
+		$article = json_decode(json_encode($result[0], true));
+		$title = "Read article:";
+		$description = $article->title;
+		$this->Todolist_model->addCard($_SESSION["userID"], "todo", $title, $description);
+	}
+	private function get_article_tags_name($articleID){
+		$tags = $this->Tags_model->getTagNameForArticles($articleID);
+		if ($tags) {
+			return $tags;
+		}
+		return false;
+	}
+	private function get_relevant_reading($articleID){
+		$tags_name = $this->get_article_tags_name($articleID);
+		$result = Array();
+		if ($tags_name) {
+			$tags_array = Array();
+			foreach ($tags_name as $tag) {
+				array_push($tags_array, $tag["name"]);
+			}
+			$result = $this->Articles_model->getArticlesByTags($tags_array);
+		}else {
+			$result = $this->Articles_model->getArticlesWithoutTags();
+		}
+		$articles = json_decode(json_encode($result), true);
+		foreach($articles as $index => $article){
+			if($article["articleID"] == $articleID) unset($articles[$index]);
+		}
+		if(sizeof($articles) > 5) return array_slice($articles, 0, 5); else return $articles;
+	}
+	public function add_count($slug)
+	{
+		$this->load->helper('cookie');
+		$check_visitor = $this->input->cookie(urldecode($slug), FALSE);
+		$ip = $this->input->ip_address();
+		if ($check_visitor == false) {
+			$cookie = array(
+				"name" => urldecode($slug),
+				"value" => "$ip",
+				"expire" => time() + 7200,
+				"secure" => false
+			);
+			$this->input->set_cookie($cookie);
+			$this->Articles_model->update_counter($slug);
+		}
+	}
+	private function get_catalog(){
+		$data["firstLevel"] = $this->Catalog_model->get_first_level();
+		$secondLevel = array();
+		foreach($data["firstLevel"] as $firstLevel){
+			array_push($secondLevel, $this->Catalog_model->get_second_level($firstLevel));
+		}
+		$data["secondLevel"] = $secondLevel;
+		$thirdLevel = array();
+		foreach($data["secondLevel"] as $firstLevel){
+			$secondLevelArray = array();
+			foreach($firstLevel as $secondLevel){
+				array_push($secondLevelArray, $this->Catalog_model->get_third_level($secondLevel));
+			}
+			array_push($thirdLevel, $secondLevelArray);
+		}
+		$data["thirdLevel"]= $thirdLevel;
+		return $data;
+	}
+}
